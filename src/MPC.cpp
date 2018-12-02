@@ -5,9 +5,8 @@
 
 using CppAD::AD;
 
-// TODO: Set the timestep length and duration
 size_t N = 10;
-double dt = 0.1;
+double dt = 0.05;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -43,33 +42,48 @@ class FG_eval {
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
   void operator()(ADvector &fg, const ADvector &vars) {
-    //TODO implement cost function
     fg[0] = 0;
 
-    const double weight_cte = 2000;
-    const double weight_epsi = 2000;
+    const double weight_cte = 12000;
+    const double weight_epsi = 1;
+    
+    const double weight_delta = 1;
+    const double weight_delta_dt = 1;
+    const double weight_delta_mean = 500000;
+    const double weight_delta_change = 1000;
+    
+    
+    
     const double weight_v = 10;
-    const double weight_delta = 10;
     const double weight_a = 30;
-    const double weight_delta_dt = 100000;
     const double weight_a_dt = 2000000;
 
     // The part of the cost based on the reference state.
+    AD<double> cte_w = 1.0;
     for (int t = 0; t < N; t++) {
-      fg[0] += weight_cte * CppAD::pow(vars[cte_start + t], 2);
+      fg[0] += weight_cte * CppAD::pow(vars[cte_start + t], 2) / cte_w;
+      cte_w += 0.25;
       fg[0] += weight_epsi * CppAD::pow(vars[epsi_start + t], 2);
       fg[0] += weight_v * CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
 
     // Minimize the use of actuators.
+    AD<double> sum_delta = 0.0;
+    AD<double> count_delta = 0.0;
     for (int t = 0; t < N - 1; t++) {
       fg[0] += weight_delta * CppAD::pow(vars[delta_start + t], 2);
+      sum_delta += CppAD::pow(vars[delta_start + t], 2);
+      count_delta += 1.0;
       fg[0] += weight_a * CppAD::pow(vars[a_start + t], 2);
+    }
+    if(count_delta != 0.0){
+      fg[0] += weight_delta_mean * sum_delta/count_delta;
     }
 
     // Minimize the value gap between sequential actuations.
     for (int t = 0; t < N - 2; t++) {
       fg[0] += weight_delta_dt * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += weight_delta_change * CppAD::pow(CppAD::abs(vars[delta_start + t + 1]) + CppAD::abs(vars[delta_start + t]) - CppAD::abs(vars[delta_start + t +1] + vars[delta_start + t]), 6);
       fg[0] += weight_a_dt * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
