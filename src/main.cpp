@@ -72,6 +72,18 @@ int main() {
 
   // MPC is initialized here!
   MPC mpc;
+  cin >> mpc.weight_cte;
+  cin >> mpc.weight_cte_change;
+  cin >> mpc.weight_epsi;
+  
+  cin >> mpc.weight_delta;
+  cin >> mpc.weight_delta_dt;
+  cin >> mpc.weight_delta_mean;
+  cin >> mpc.weight_delta_change;
+  
+  cin >> mpc.weight_v;
+  cin >> mpc.weight_a;
+  cin >> mpc.weight_a_dt;
 
   h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {

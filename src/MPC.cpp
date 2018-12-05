@@ -20,7 +20,7 @@ double dt = 0.05;
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
 
-double ref_v = 40;
+double ref_v = 150;
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -34,8 +34,25 @@ size_t epsi_start = cte_start + N;
 size_t delta_start = epsi_start + N;
 size_t a_start = delta_start + N - 1;
 
+
+// static double weight_cte_inc = 0;
+
 class FG_eval {
  public:
+ 
+  double weight_cte = 0;
+  double weight_cte_change = 0;
+  double weight_epsi = 0;
+  
+  double weight_delta = 0;
+  double weight_delta_dt = 0.0000;
+  double weight_delta_mean = 0.000;
+  double weight_delta_change = 0;
+
+  double weight_v = 0;
+  double weight_a = 0;
+  double weight_a_dt = 0;
+
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
@@ -44,48 +61,45 @@ class FG_eval {
   void operator()(ADvector &fg, const ADvector &vars) {
     fg[0] = 0;
 
-    const double weight_cte = 12000;
-    const double weight_epsi = 1;
     
-    const double weight_delta = 1;
-    const double weight_delta_dt = 1;
-    const double weight_delta_mean = 500000;
-    const double weight_delta_change = 1000;
-    
-    
-    
-    const double weight_v = 10;
-    const double weight_a = 30;
-    const double weight_a_dt = 2000000;
-
     // The part of the cost based on the reference state.
-    AD<double> cte_w = 1.0;
     for (int t = 0; t < N; t++) {
-      fg[0] += weight_cte * CppAD::pow(vars[cte_start + t], 2) / cte_w;
-      cte_w += 0.25;
+      fg[0] += weight_cte * CppAD::pow(vars[cte_start + t], 2);
       fg[0] += weight_epsi * CppAD::pow(vars[epsi_start + t], 2);
       fg[0] += weight_v * CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
 
+
+
     // Minimize the use of actuators.
+    for (int t = 0; t < N - 1; t++) {
+      fg[0] += weight_cte_change * CppAD::pow(CppAD::abs(vars[cte_start + t + 1]) + CppAD::abs(vars[cte_start + t]) - CppAD::abs(vars[cte_start + t +1] + vars[cte_start + t]), 6);
+      fg[0] += weight_delta * CppAD::pow(vars[delta_start + t] / (CppAD::abs(vars[cte_start + t])+0.001), 2);      
+      fg[0] += weight_a * CppAD::pow(vars[a_start + t], 2);
+    }
+
+    // Minimize the value gap between sequential actuations.
     AD<double> sum_delta = 0.0;
     AD<double> count_delta = 0.0;
-    for (int t = 0; t < N - 1; t++) {
-      fg[0] += weight_delta * CppAD::pow(vars[delta_start + t], 2);
-      sum_delta += CppAD::pow(vars[delta_start + t], 2);
+    for (int t = 0; t < N - 2; t++) {
+      fg[0] += weight_delta_dt * CppAD::pow((vars[delta_start + t + 1] - vars[delta_start + t]) / (CppAD::abs(vars[cte_start + t])+0.001), 2);
+      fg[0] += weight_delta_change * CppAD::pow(CppAD::abs(vars[delta_start + t + 1]) + CppAD::abs(vars[delta_start + t]) - CppAD::abs(vars[delta_start + t +1] + vars[delta_start + t]), 6);
+      fg[0] += weight_a_dt * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      
+      sum_delta += CppAD::pow((vars[delta_start + t + 1] - vars[delta_start + t]), 2);
       count_delta += 1.0;
-      fg[0] += weight_a * CppAD::pow(vars[a_start + t], 2);
     }
     if(count_delta != 0.0){
       fg[0] += weight_delta_mean * sum_delta/count_delta;
     }
 
-    // Minimize the value gap between sequential actuations.
-    for (int t = 0; t < N - 2; t++) {
-      fg[0] += weight_delta_dt * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += weight_delta_change * CppAD::pow(CppAD::abs(vars[delta_start + t + 1]) + CppAD::abs(vars[delta_start + t]) - CppAD::abs(vars[delta_start + t +1] + vars[delta_start + t]), 6);
-      fg[0] += weight_a_dt * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
-    }
+
+
+
+
+
+
+
 
     // Set the constraints for the initial state
     fg[1 + x_start] = vars[x_start];
@@ -220,6 +234,16 @@ std::vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
 
   // object that computes objective and constraints
   FG_eval fg_eval(coeffs);
+  fg_eval.weight_cte = this->weight_cte;
+  fg_eval.weight_cte_change = this->weight_cte_change;
+  fg_eval.weight_delta = this->weight_delta;
+  fg_eval.weight_delta_dt = this->weight_delta_dt;
+  fg_eval.weight_delta_mean = this->weight_delta_mean;
+  fg_eval.weight_delta_change = this->weight_delta_change;
+  fg_eval.weight_v = this->weight_v;
+  fg_eval.weight_a = this->weight_a;
+  fg_eval.weight_a_dt = this->weight_a_dt;
+  
 
   //
   // NOTE: You don't have to worry about these options
@@ -263,6 +287,59 @@ std::vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
     result.push_back(solution.x[x_start + i]);
     result.push_back(solution.x[y_start + i]);
   }
+  
+  
+  
+  AD<double> cte_e = 0.0;
+  AD<double> weight_delta_e = 0.0;
+  AD<double> weight_delta_dt_e = 0.0;
+  AD<double> weight_delta_mean_e = 0.0;
+  AD<double> weight_v_e = 0.0;
+  AD<double> weight_a_dt_e = 0.0;
+  
+  
+  // The part of the cost based on the reference state.
+    for (int t = 0; t < N; t++) {
+      cte_e += weight_cte * CppAD::pow(solution.x[cte_start + t], 2);
+      weight_v_e += weight_v * CppAD::abs(solution.x[v_start + t] - ref_v);
+    }
+
+    // Minimize the use of actuators.
+    AD<double> sum_delta = 0.0;
+    AD<double> count_delta = 0.0;
+    for (int t = 0; t < N - 1; t++) {
+      AD<double> cte_pow = CppAD::pow(solution.x[cte_start + t], 2);
+      if (cte_pow <= 0.1) {
+        cte_pow = 0.1;
+      }
+      weight_delta_e += weight_delta * CppAD::pow(solution.x[delta_start + t] / cte_pow, 2);
+      sum_delta += CppAD::pow(solution.x[delta_start + t] / cte_pow, 2);
+      count_delta += 1.0;
+    }
+    if(count_delta != 0.0){
+      weight_delta_mean_e += weight_delta_mean * sum_delta/count_delta;
+    }
+
+    // Minimize the value gap between sequential actuations.
+    for (int t = 0; t < N - 2; t++) {
+      AD<double> cte_pow = CppAD::pow(solution.x[cte_start + t], 2);
+      if (cte_pow <= 0.1) {
+        cte_pow = 0.1;
+      }
+      weight_delta_dt_e += weight_delta_dt * CppAD::pow((solution.x[delta_start + t + 1] - solution.x[delta_start + t]) / cte_pow, 2);
+      weight_a_dt_e += weight_a_dt * CppAD::pow(solution.x[a_start + t + 1] - solution.x[a_start + t], 2);
+    }
+    
+    
+  std::cout << "cte_e " << cte_e << std::endl;
+  std::cout << "weight_delta_e " << weight_delta_e << std::endl;
+  std::cout << "weight_delta_dt_e " << weight_delta_dt_e << std::endl;
+  std::cout << "weight_delta_mean_e " << weight_delta_mean_e << std::endl;
+  std::cout << "weight_v_e " << weight_v_e << std::endl;
+  std::cout << "weight_a_dt_e " << weight_a_dt_e << std::endl;
+  
+    
+    
 
   return result;
 }
